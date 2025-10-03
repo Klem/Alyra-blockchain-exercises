@@ -8,4 +8,9 @@ contract People {
     }
 
     Person public moi = Person("Klem", 43);
+
+    function  modifyPerson(string memory _name, uint8 _age) public {
+        moi.name = _name;
+        moi.age = _age;
+    }
 }
