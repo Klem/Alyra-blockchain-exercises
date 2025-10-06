@@ -6,15 +6,19 @@ contract Whitelist {
 
     event authorized(address _address);
 
-    // Contract deployer is always whitelisted
+   // Contract deployer is always whitelisted
     constructor() {
         whitelist[msg.sender]= true;
     }
 
+    modifier isAuthorized() {
+        require(check(), "Unauthorized access");
+        _;
+    }
+
     // add another whitelisted address if requester
     // is authorized
-    function authorize(address _address) public {
-        require(check(), "Unauthorized access");
+    function authorize(address _address) public isAuthorized() {
         whitelist[_address] = true;
         emit authorized(_address);
     }
