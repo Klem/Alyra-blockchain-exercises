@@ -36,6 +36,8 @@ contract Payable {
         return address(this).balance;
     }
 
+
+
     //  is msg.data empty?
     //          /   \
     //         yes  no
