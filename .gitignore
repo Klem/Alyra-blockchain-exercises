@@ -2,3 +2,5 @@
 /.deps
 /.git
 /.prettierrc.json
+/.idea
+/artifacts

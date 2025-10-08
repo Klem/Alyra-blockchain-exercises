@@ -8,15 +8,14 @@ contract Payable {
 
     }
 
-    function sendViaTransfert(address payable _to) payable public {
-            _to.transfer(msg.value);
+    function sendViaTransfert(address payable _to) payable external {
+        _to.transfer(msg.value);
     }
 
-        function sendViaSend(address payable _to) payable public {
-           bool ok =  _to.send(msg.value);
-           require(ok, "Transfert failed");
+    function sendViaSend(address payable _to) payable external {
+        bool ok =  _to.send(msg.value);
+        require(ok, "Transfert failed");
     }
-
 
     function amIRich() view public returns (uint) {
         return address(this).balance;
