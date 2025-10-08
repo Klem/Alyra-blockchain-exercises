@@ -11,6 +11,7 @@ contract EthSender {
 
     function sendEtherToContract(address receiverContract) public payable {
             (bool _success, ) = receiverContract.call {value: amIRich()}(abi.encodeWithSignature("receiveEthersFromContract()"));
+            require(_success, "sendEtherTocontract");
     }
 
      function amIRich() view public returns (uint) {
