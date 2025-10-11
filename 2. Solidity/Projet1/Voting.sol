@@ -4,9 +4,9 @@ pragma solidity ^0.8.28;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract Voting is Ownable {
-    uint256 private _winnigProposalId = 0; // default for not mistaking proposal 0 and no results yet;
+    uint256 private _winningProposalId = 0;
     WorkflowStatus private _currentStatus;
-    mapping(address => Voter) _voters;
+    mapping(address => Voter) private _voters;
     address[] private _registeredAddresses;
     Proposal[] private _proposals;
 
@@ -40,6 +40,7 @@ contract Voting is Ownable {
     error invalidWorkflowStatus();
     error invalidStatusTransition();
     error invalidAddress();
+    error unregisteredVoterOrNotTheAdmin();
     error unregisteredVoter();
     error emptyProposal();
 
@@ -48,8 +49,14 @@ contract Voting is Ownable {
         _;
     }
 
+    // move to +
     modifier registeredVoterOrOwner() {
-        require(_voters[msg.sender].isRegistered || msg.sender == owner(), unregisteredVoter());
+        require(_voters[msg.sender].isRegistered || msg.sender == owner(), unregisteredVoterOrNotTheAdmin() );
+        _;
+    }
+
+     modifier registeredVoter() {
+        require(_voters[msg.sender].isRegistered, unregisteredVoter() );
         _;
     }
 
@@ -58,10 +65,8 @@ contract Voting is Ownable {
     }
 
     // todo utiliy methods (openRegistration....)
-    function moveToWorkflowStatus(WorkflowStatus _newStatus)
-        public
-        onlyOwner
-        returns (WorkflowStatus)
+    // todo make sure everybody has casted a vote
+    function moveToWorkflowStatus(WorkflowStatus _newStatus) public onlyOwner returns (WorkflowStatus)
     {
         uint256 ns = uint256(_newStatus);
         uint256 cs = uint256(_currentStatus);
@@ -76,15 +81,9 @@ contract Voting is Ownable {
     }
 
     // todo voterAlreadyRegistered
-    function addVoter(address _address)
-        public
-        onlyOwner
-        addressValid(_address)
+    function addVoter(address _address) public onlyOwner addressValid(_address)
     {
-        require(
-            _currentStatus == WorkflowStatus.RegisteringVoters,
-            invalidWorkflowStatus()
-        );
+        require(_currentStatus == WorkflowStatus.RegisteringVoters,invalidWorkflowStatus());
 
         _voters[_address] = Voter(true, false, 0);
         _registeredAddresses.push(_address);
@@ -94,14 +93,11 @@ contract Voting is Ownable {
 
     // todo check for proposal minimum lenght
     // require(bytes(_proposal).length >= 15 , "Your proposal should be at least 15 charachers long");
-    function addProposal(string memory _proposal) public registeredVoterOrOwner {
-        require(
-            _currentStatus == WorkflowStatus.ProposalsRegistrationStarted,
-            invalidWorkflowStatus()
-        );
+    function addProposal(string memory _proposal) public registeredVoter {
+        require(_currentStatus == WorkflowStatus.ProposalsRegistrationStarted, invalidWorkflowStatus());
 
-        uint256 proposalId = _proposals.length +1; // do not put 0 as a proposalId
-        _proposals.push(Proposal(_proposal, proposalId));
+        uint256 proposalId = _proposals.length + 1;//do not use 0 as a valid ID
+        _proposals.push(Proposal(_proposal, 0));
 
         emit proposalRegistered(proposalId);
     }
@@ -109,34 +105,29 @@ contract Voting is Ownable {
     // todo make sure proposal exists
     // todo make sure proposal list is not empty
     // todo take blank vote into account
-    // todo make sure voter votes only once  if(v.hasVoted) {revert("You have already casted your vote");}
     // require(proposalId >= 0 && proposalId <= proposal.lenght-1)
-    function vote(uint256 proposalId) public registeredVoterOrOwner {
-        require(
-            _currentStatus == WorkflowStatus.VotingSessionStarted,
-            invalidWorkflowStatus()
-        );
+    function vote(uint256 proposalId) public registeredVoter returns (Voter memory){
+        require( _currentStatus == WorkflowStatus.VotingSessionStarted, invalidWorkflowStatus() );
+        require(!_voters[msg.sender].hasVoted, "Already voted");
 
-        _proposals[proposalId -1 ].voteCount++;  // take +1 offset into account
-        Voter memory v = _voters[msg.sender];
-        v.hasVoted = true;
-        v.votedProposalId = proposalId;
+        _proposals[proposalId -1 ].voteCount++;
+        _voters[msg.sender].hasVoted = true;
+        _voters[msg.sender].votedProposalId = proposalId;
 
         emit voted(msg.sender, proposalId);
+
+        return  _voters[msg.sender];
     }
 
     function tally() public onlyOwner {
-        require(
-            _currentStatus == WorkflowStatus.VotingSessionEnded,
-            invalidWorkflowStatus()
-        );
+        require(_currentStatus == WorkflowStatus.VotingSessionEnded, invalidWorkflowStatus());
         
        uint maxVoteCount = 0;
 
        for (uint256 i = 0; i < _proposals.length; i++) {
             if (_proposals[i].voteCount > maxVoteCount) {
                 maxVoteCount = _proposals[i].voteCount;
-                _winnigProposalId = i;
+                _winningProposalId = i + 1; // take +1 offset into account
             }
         }
 
@@ -144,43 +135,59 @@ contract Voting is Ownable {
     }
 
     function getVotes() public view registeredVoterOrOwner returns (Voter[] memory) {
-        Voter[] memory voters = new Voter[](_registeredAddresses.length);
-
-        for (uint256 i = 0; i <= _registeredAddresses.length; i++) {
-            voters[i] = (_voters[_registeredAddresses[i]]);
+        // Count voters who have voted
+        uint256 votedCount = 0;
+        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
+            if (_voters[_registeredAddresses[i]].hasVoted) {
+                votedCount++;
+            }
+        }
+    
+        Voter[] memory voters = new Voter[](votedCount);
+        
+        uint256 index = 0;
+        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
+            if (_voters[_registeredAddresses[i]].hasVoted) {
+                voters[index] = _voters[_registeredAddresses[i]];
+                index++;
+            }
         }
 
         return voters;
     }
 
+
     // reset all for another round
     function reset() public onlyOwner() {
-        for (uint256 i = 0; i <= _registeredAddresses.length; i++) {
-            Voter memory v = (_voters[_registeredAddresses[i]]);
-            v.isRegistered = false;
-            v.hasVoted = false;
-            v.votedProposalId = 0;
+        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
+            _voters[_registeredAddresses[i]].isRegistered = false;
+            _voters[_registeredAddresses[i]].hasVoted = false;
+            _voters[_registeredAddresses[i]].votedProposalId = 0;
         }
 
         delete _proposals;
         delete _registeredAddresses;
         _currentStatus = WorkflowStatus.RegisteringVoters;
-        _winnigProposalId = 0;
+        _winningProposalId = 0;
 
         emit reinitialized();
     }
 
-    function getWinningProposal() public view returns (uint256) {
-        return _winnigProposalId;
+    function getWinningProposal() public view registeredVoterOrOwner returns (Proposal memory) {
+        return _proposals[_winningProposalId -1 ];// take +1 offset into account
     }
 
     // todo, make sure admin can view too
-    function getProposals() public view returns (Proposal[] memory) {
+    function getProposals() public view registeredVoterOrOwner returns (Proposal[] memory) {
         return _proposals;
     }
 
 
-    function getWorkflowStatus() public view returns (WorkflowStatus) {
+    function getWorkflowStatus() public view registeredVoterOrOwner returns (WorkflowStatus) {
         return _currentStatus;
+    }
+
+      function getRegisteredVoters() public view returns (address[] memory) {
+        return _registeredAddresses;
     }
 }
