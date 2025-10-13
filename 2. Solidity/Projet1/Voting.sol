@@ -34,8 +34,6 @@ contract Voting is Ownable {
     event workflowStatusChange(WorkflowStatus previousStatus, WorkflowStatus newStatus);
     event proposalRegistered(uint256 proposalId);
     event voted(address voter, uint256 proposalId);
-    // move to voting+
-    event reinitialized();
 
     error invalidWorkflowStatus();
     error invalidStatusTransition();
@@ -49,7 +47,6 @@ contract Voting is Ownable {
         _;
     }
 
-    // move to +
     modifier registeredVoterOrOwner() {
         require(_voters[msg.sender].isRegistered || msg.sender == owner(), unregisteredVoterOrNotTheAdmin() );
         _;
@@ -64,8 +61,6 @@ contract Voting is Ownable {
         _currentStatus = WorkflowStatus.RegisteringVoters;
     }
 
-    // todo utiliy methods (openRegistration....)
-    // todo make sure everybody has casted a vote
     function moveToWorkflowStatus(WorkflowStatus _newStatus) public onlyOwner returns (WorkflowStatus)
     {
         uint256 ns = uint256(_newStatus);
@@ -80,7 +75,7 @@ contract Voting is Ownable {
         return _newStatus;
     }
 
-    // todo voterAlreadyRegistered
+
     function addVoter(address _address) public onlyOwner addressValid(_address)
     {
         require(_currentStatus == WorkflowStatus.RegisteringVoters,invalidWorkflowStatus());
@@ -91,26 +86,21 @@ contract Voting is Ownable {
         emit voterRegistered(_address);
     }
 
-    // todo check for proposal minimum lenght
-    // require(bytes(_proposal).length >= 15 , "Your proposal should be at least 15 charachers long");
+
     function addProposal(string memory _proposal) public registeredVoter {
         require(_currentStatus == WorkflowStatus.ProposalsRegistrationStarted, invalidWorkflowStatus());
 
-        uint256 proposalId = _proposals.length + 1;//do not use 0 as a valid ID
+        uint256 proposalId = _proposals.length;
         _proposals.push(Proposal(_proposal, 0));
 
         emit proposalRegistered(proposalId);
     }
 
-    // todo make sure proposal exists
-    // todo make sure proposal list is not empty
-    // todo take blank vote into account
-    // require(proposalId >= 0 && proposalId <= proposal.lenght-1)
     function vote(uint256 proposalId) public registeredVoter returns (Voter memory){
         require( _currentStatus == WorkflowStatus.VotingSessionStarted, invalidWorkflowStatus() );
         require(!_voters[msg.sender].hasVoted, "Already voted");
 
-        _proposals[proposalId -1 ].voteCount++;
+        _proposals[proposalId].voteCount++;
         _voters[msg.sender].hasVoted = true;
         _voters[msg.sender].votedProposalId = proposalId;
 
@@ -127,7 +117,7 @@ contract Voting is Ownable {
        for (uint256 i = 0; i < _proposals.length; i++) {
             if (_proposals[i].voteCount > maxVoteCount) {
                 maxVoteCount = _proposals[i].voteCount;
-                _winningProposalId = i + 1; // take +1 offset into account
+                _winningProposalId = i;
             }
         }
 
@@ -155,29 +145,10 @@ contract Voting is Ownable {
 
         return voters;
     }
-
-
-    // reset all for another round
-    function reset() public onlyOwner() {
-        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
-            _voters[_registeredAddresses[i]].isRegistered = false;
-            _voters[_registeredAddresses[i]].hasVoted = false;
-            _voters[_registeredAddresses[i]].votedProposalId = 0;
-        }
-
-        delete _proposals;
-        delete _registeredAddresses;
-        _currentStatus = WorkflowStatus.RegisteringVoters;
-        _winningProposalId = 0;
-
-        emit reinitialized();
-    }
-
     function getWinningProposal() public view registeredVoterOrOwner returns (Proposal memory) {
-        return _proposals[_winningProposalId -1 ];// take +1 offset into account
+        return _proposals[_winningProposalId];
     }
 
-    // todo, make sure admin can view too
     function getProposals() public view registeredVoterOrOwner returns (Proposal[] memory) {
         return _proposals;
     }
