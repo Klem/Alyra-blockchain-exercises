@@ -2,10 +2,23 @@
 pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-
+/**
+* This version of voting offer the following improvment
+  Checks if voters are registered before proceeding to proposalSubmission
+  Checks if there are proposals before starting the vote
+  Voter can vote only once
+  Voter can be registered only once
+  Start the voting session with parameters:
+    - allowBlank: generate a "blank" proposal before starting the voting session
+    - allowAbstention: all voters are not required to cast a vote before the votingSession can be ended
+    Both are intended to be used exclusively: eg you offer a blank option whenever all participants are required to vote
+    but both flags can be set to "true"
+   Reset: reset the status for another round of proposal submission and votes
+*/
 contract Voting is Ownable {
     uint256 private _winningProposalId = 0;
     WorkflowStatus private _currentStatus;
+    VoteConfiguration private _config;
     mapping(address => Voter) private _voters;
     address[] private _registeredAddresses;
     Proposal[] private _proposals;
@@ -19,6 +32,11 @@ contract Voting is Ownable {
     struct Proposal {
         string description;
         uint256 voteCount;
+    }
+
+    struct VoteConfiguration {
+        bool allowBlank;
+        bool allowAbstention;
     }
 
     enum WorkflowStatus {
@@ -67,38 +85,6 @@ contract Voting is Ownable {
         _currentStatus = WorkflowStatus.RegisteringVoters;
     }
 
-    function _moveToWorkflowStatus(WorkflowStatus _newStatus) private onlyOwner returns (WorkflowStatus)
-    {
-        uint256 ns = uint256(_newStatus);
-        uint256 cs = uint256(_currentStatus);
-        require(ns == cs + 1, invalidStatusTransition());
-
-        WorkflowStatus previousStatus = _currentStatus;
-        _currentStatus = _newStatus;
-
-        emit workflowStatusChange(previousStatus, _newStatus);
-
-        return _newStatus;
-    }
-
-    function startProposalSubmission() public onlyOwner returns (WorkflowStatus) {
-           return _moveToWorkflowStatus(WorkflowStatus.ProposalsRegistrationStarted);
-    }
-
-    function endProposalSubmission() public onlyOwner returns (WorkflowStatus) {
-           require(_proposals.length > 0, "No proposal submitted");
-           return _moveToWorkflowStatus(WorkflowStatus.ProposalsRegistrationEnded);
-    }
-
-    function startVotingSession() public onlyOwner returns (WorkflowStatus) {
-           return _moveToWorkflowStatus(WorkflowStatus.VotingSessionStarted);
-    }
-
-    function endVotingSession() public onlyOwner returns (WorkflowStatus) {
-           return _moveToWorkflowStatus(WorkflowStatus.VotingSessionEnded);
-    }
-
-    // todo voterAlreadyRegistered
     function addVoter(address _address) public onlyOwner addressValid(_address) voterNotRegistered(_address) 
     {
         require(_currentStatus == WorkflowStatus.RegisteringVoters,invalidWorkflowStatus());
@@ -109,26 +95,17 @@ contract Voting is Ownable {
         emit voterRegistered(_address);
     }
 
-    // todo check for proposal minimum lenght
-    // 
     function addProposal(string memory _proposal) public registeredVoter {
         require(_currentStatus == WorkflowStatus.ProposalsRegistrationStarted, invalidWorkflowStatus());
         require(bytes(_proposal).length >= 5 , "Your proposal should be at least 5 charachers long");
 
-        uint256 proposalId = _proposals.length;
-        _proposals.push(Proposal(_proposal, 0));
+        _addProposal(_proposal);
+    } 
 
-        emit proposalRegistered(proposalId);
-    }
-
-   
-    // todo make sure proposal list is not empty
-    // todo take blank vote into account
-    // require(proposalId >= 0 && proposalId <= proposal.lenght-1)
     function vote(uint256 proposalId) public registeredVoter returns (Voter memory){
         require( _currentStatus == WorkflowStatus.VotingSessionStarted, invalidWorkflowStatus() );
         require(!_voters[msg.sender].hasVoted, "Already voted");
-        require((proposalId >=0 && proposalId < _proposals.length - 1),"Provided proposalId does not exists");
+        require((proposalId >=0 && proposalId < _proposals.length),"Provided proposalId does not exists");
 
         _proposals[proposalId].voteCount++;
         _voters[msg.sender].hasVoted = true;
@@ -155,14 +132,8 @@ contract Voting is Ownable {
     }
 
     function getVotes() public view registeredVoterOrOwner returns (Voter[] memory) {
-        // Count voters who have voted
-        uint256 votedCount = 0;
-        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
-            if (_voters[_registeredAddresses[i]].hasVoted) {
-                votedCount++;
-            }
-        }
-    
+        uint256 votedCount = _countVotes();
+
         Voter[] memory voters = new Voter[](votedCount);
         
         uint256 index = 0;
@@ -175,7 +146,6 @@ contract Voting is Ownable {
 
         return voters;
     }
-
 
     // reset all for another round
     function reset() public onlyOwner() {
@@ -193,7 +163,39 @@ contract Voting is Ownable {
         emit reinitialized();
     }
 
+    function startProposalSubmission() public onlyOwner returns (WorkflowStatus) {
+           require(_registeredAddresses.length > 0, "No voters registered");
+           return _moveToWorkflowStatus(WorkflowStatus.ProposalsRegistrationStarted);
+    }
+
+    function endProposalSubmission() public onlyOwner returns (WorkflowStatus) {
+           require(_proposals.length > 0, "No proposal submitted");
+           return _moveToWorkflowStatus(WorkflowStatus.ProposalsRegistrationEnded);
+    }
+
+    function startVotingSession(bool _abstentionAllowed, bool _blankVoteAllowed) public onlyOwner returns (WorkflowStatus) {
+           WorkflowStatus _status = _moveToWorkflowStatus(WorkflowStatus.VotingSessionStarted);
+
+           _config.allowAbstention = _abstentionAllowed;
+           _config.allowBlank = _blankVoteAllowed;
+
+            if(_blankVoteAllowed) {
+                _addProposal("Blank vote");
+            }
+
+           return _status;
+    }
+
+    function endVotingSession() public onlyOwner returns (WorkflowStatus) {
+        if(!_config.allowAbstention) {
+            require(_registeredAddresses.length == _countVotes(), "Every voter must cast a vote");
+        }
+           
+        return _moveToWorkflowStatus(WorkflowStatus.VotingSessionEnded);
+    }
+
     function getWinningProposal() public view registeredVoterOrOwner returns (Proposal memory) {
+        require(_proposals.length > 0, "No proposals defined");
         return _proposals[_winningProposalId];
     }
 
@@ -207,5 +209,41 @@ contract Voting is Ownable {
 
     function getRegisteredVoters() public view returns (address[] memory) {
         return _registeredAddresses;
+    }
+
+    function getvoteConfiguration() public view registeredVoterOrOwner returns (VoteConfiguration memory) {
+        return _config;
+    }
+
+    function _countVotes() private view returns (uint) {
+         uint256 votedCount = 0;
+        for (uint256 i = 0; i < _registeredAddresses.length; i++) {
+            if (_voters[_registeredAddresses[i]].hasVoted) {
+                votedCount++;
+            }
+        }
+
+        return votedCount;
+    }
+
+    function _moveToWorkflowStatus(WorkflowStatus _newStatus) private onlyOwner returns (WorkflowStatus)
+    {
+        uint256 ns = uint256(_newStatus);
+        uint256 cs = uint256(_currentStatus);
+        require(ns == cs + 1, invalidStatusTransition());
+
+        WorkflowStatus previousStatus = _currentStatus;
+        _currentStatus = _newStatus;
+
+        emit workflowStatusChange(previousStatus, _newStatus);
+
+        return _newStatus;
+    }
+
+    function _addProposal (string memory _proposal) private {
+        uint256 proposalId = _proposals.length;
+        _proposals.push(Proposal(_proposal, 0));
+
+        emit proposalRegistered(proposalId);
     }
 }
