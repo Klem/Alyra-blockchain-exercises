@@ -25,3 +25,7 @@ async function main(): Promise<void> {
     tx4.wait();
 
 }
+main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});
