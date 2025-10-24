@@ -1,7 +1,7 @@
 
 # 🧪 Projet 2 — Tests Unitaires sur le Smart Contract *Voting*
 
-Suite à ma question sur Discord et à la réponse de Ben, j’ai ajouté la fonction suivante pour faciliter la lecture des propositions :
+Suite à ma question sur Discord et à la réponse de Ben, j’ai ajouté la fonction suivante pour récuperer le nombre de proposals :
 
 ```solidity
 function getProposalsCount() external view returns (uint) {
